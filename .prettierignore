@@ -1,0 +1,44 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs and artifacts
+dist/
+build/
+.next/
+out/
+.nuxt/
+target/
+bin/
+obj/
+
+# Logs and system files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# Coverage and testing
+coverage/
+.nyc_output/
+
+# Environment variables (Safety first!)
+.env
+.env.*
+!.env.example
+
+# Version control
+.git/
+.svn/
+.hg/
+
+# Documentation or static assets (Optional)
+# Uncomment if you prefer manual formatting for these
+# *.md
+# *.html
+# public/
