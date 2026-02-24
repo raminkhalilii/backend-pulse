@@ -1,0 +1,86 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MonitorFrequency {
+  ONE_MIN    @map("1m")
+  FIVE_MIN   @map("5m")
+  THIRTY_MIN @map("30m")
+}
+
+enum PingStatus {
+  UP
+  DOWN
+}
+
+model User {
+  id           String  @id @default(uuid())
+  email        String  @unique
+  name         String
+  passwordHash String
+  refreshToken String? // Stores the currently valid refresh token for JWT
+
+  monitors Monitor[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Monitor {
+  id        String           @id @default(uuid())
+  userId    String
+  name      String
+  url       String
+  frequency MonitorFrequency @default(ONE_MIN)
+  isActive  Boolean          @default(true) // Ability to pause a monitor
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  heartbeats Heartbeat[]
+  summaries  HourlySummary[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Heartbeat {
+  id        BigInt     @id @default(autoincrement())
+  monitorId String
+  status    PingStatus
+  latencyMs Int? // Nullable in case of a complete timeout where TTFB isn't reached
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  timestamp DateTime @default(now())
+
+  // Indexing by monitorId and timestamp is crucial for dashboard queries
+  @@index([monitorId, timestamp(sort: Desc)])
+}
+
+model HourlySummary {
+  id            String   @id @default(uuid())
+  monitorId     String
+  hour          DateTime // Truncated to the exact hour (e.g., 2026-02-20T14:00:00Z)
+  uptimePercent Float
+  avgLatencyMs  Float
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([monitorId, hour]) // A monitor can only have one summary per specific hour
+}
