@@ -11,12 +11,11 @@ export interface AuthTokens {
 
 @Injectable()
 export class AuthService {
-  private savedUser: Omit<User, 'password'>;
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
   ) {}
-  async registerUser(data: CreateUserData): Promise<Omit<User, 'password'>> {
+  async registerUser(data: CreateUserData): Promise<AuthTokens> {
     // 1. Check if a user exists
     const existingUser = await this.userService.userFindByEmail(data.email);
     if (existingUser) {
@@ -30,7 +29,8 @@ export class AuthService {
       password: hashedPassword,
     };
 
-    return (this.savedUser = await this.userService.createUser(userToCreate));
+    const savedUser = await this.userService.createUser(userToCreate);
+    return await this.generateTokens(savedUser.id, savedUser.email);
   }
 
   async validateUser(email: string, password: string): Promise<User> {
@@ -53,10 +53,7 @@ export class AuthService {
       sub: userId,
       email,
     };
-    const accessToken = await this.jwtService.signAsync(jwtPayload, {
-      secret: process.env.ACCESS_TOKEN_SECRET,
-      expiresIn: '15m',
-    });
+    const accessToken = await this.jwtService.signAsync(jwtPayload);
     const refreshToken = await this.jwtService.signAsync(jwtPayload, {
       secret: process.env.JWT_REFRESH_SECRET,
       expiresIn: '7d',
