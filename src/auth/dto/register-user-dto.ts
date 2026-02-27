@@ -18,9 +18,9 @@ export class RegisterUserDto {
   name: string;
 
   @ApiProperty({
-    description: 'The hashed password',
+    description: 'The password',
   })
   @IsString()
-  @MinLength(8)
-  passwordHash: string;
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  password: string;
 }

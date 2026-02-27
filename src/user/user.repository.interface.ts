@@ -2,7 +2,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  passwordHash: string;
+  password: string;
   refreshToken?: string | null;
 }
 // what user needs: 1-username 2-password(hashed Bcrypt or Argon2) 3-email 4-id
@@ -10,13 +10,14 @@ export interface User {
 export interface CreateUserData {
   email: string;
   name: string;
-  passwordHash: string;
+  password: string;
 }
 
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
   create(data: CreateUserData): Promise<User>;
+  updateRefreshToken(id: string, refreshToken: string): Promise<void>;
 }
 
 // This token is what NestJS will use to inject the repository

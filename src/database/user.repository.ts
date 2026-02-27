@@ -3,7 +3,7 @@ import { IUserRepository, User, CreateUserData } from '../user/user.repository.i
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
-export class PrismaUserRepository implements IUserRepository {
+export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: PrismaService) {}
   async findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({
@@ -20,6 +20,13 @@ export class PrismaUserRepository implements IUserRepository {
   async create(data: CreateUserData): Promise<User> {
     return this.prisma.user.create({
       data,
+    });
+  }
+
+  async updateRefreshToken(id: string, refreshToken: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id },
+      data: { refreshToken },
     });
   }
 }
