@@ -1,10 +1,4 @@
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  password: string;
-  refreshToken?: string | null;
-}
+import { User } from '../../generated/prisma/client';
 // what user needs: 1-username 2-password(hashed Bcrypt or Argon2) 3-email 4-id
 
 export interface CreateUserData {

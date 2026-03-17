@@ -1,9 +1,9 @@
-import { CreateUserData, User } from '../user/user.repository.interface';
+import { CreateUserData } from '../user/user.repository.interface';
 import { UserService } from '../user/user.service';
 import * as bcrypt from 'bcrypt';
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-
+import { User } from '../../generated/prisma/client';
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;

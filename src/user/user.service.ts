@@ -1,10 +1,10 @@
 import {
   CreateUserData,
   type IUserRepository,
-  User,
   USER_REPOSITORY_TOKEN,
 } from './user.repository.interface';
 import { Inject } from '@nestjs/common';
+import { User } from '../../generated/prisma/client';
 // TODO: we need a test for this service
 // TODO: fix the comments
 
