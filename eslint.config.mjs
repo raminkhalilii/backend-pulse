@@ -35,6 +35,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'warn',
       'unicorn/prefer-top-level-await': 'off',
       'unicorn/prevent-abbreviations': 'off',
+      'unicorn/no-null': 'off',
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
     },
   },
