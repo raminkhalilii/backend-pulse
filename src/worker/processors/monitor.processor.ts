@@ -3,9 +3,11 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PingStatus } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../prisma/prisma';
+import { MONITOR_UPDATED_CHANNEL } from '../../events/events.constants';
 import { assertPublicUrl } from '../../common/ssrf.util';
 import { MonitorJobPayload } from '../../monitor/monitor-dispatcher.service';
 import { MONITOR_QUEUE } from '../../queue/queue.constants';
+import { RedisPublisherService } from '../redis-publisher.service';
 
 interface PingResult {
   status: PingStatus;
@@ -17,7 +19,10 @@ export class MonitorProcessor extends WorkerHost {
   private readonly logger = new Logger(MonitorProcessor.name);
   private static readonly TIMEOUT_MS = 10_000;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redisPublisher: RedisPublisherService,
+  ) {
     super();
   }
 
@@ -45,6 +50,14 @@ export class MonitorProcessor extends WorkerHost {
     // 3. Persist the heartbeat regardless of outcome.
     await this.prisma.heartbeat.create({
       data: { monitorId, status: result.status, latencyMs: result.latencyMs },
+    });
+
+    // 4. Publish the result so the API Gateway can push it to WebSocket clients.
+    await this.redisPublisher.publish(MONITOR_UPDATED_CHANNEL, {
+      monitorId,
+      status: result.status,
+      latencyMs: result.latencyMs,
+      timestamp: new Date().toISOString(),
     });
 
     this.logger.log(

@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma';
 import { MONITOR_QUEUE } from '../queue/queue.constants';
 import { MonitorProcessor } from './processors/monitor.processor';
+import { RedisPublisherService } from './redis-publisher.service';
 
 @Module({
   imports: [
@@ -14,6 +15,6 @@ import { MonitorProcessor } from './processors/monitor.processor';
     }),
     BullModule.registerQueue({ name: MONITOR_QUEUE }),
   ],
-  providers: [MonitorProcessor, PrismaService],
+  providers: [MonitorProcessor, PrismaService, RedisPublisherService],
 })
 export class WorkerModule {}

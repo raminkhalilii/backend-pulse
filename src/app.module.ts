@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { EventsModule } from './events/events.module';
 import { MonitorModule } from './monitor/monitor.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { UserModule } from './user/user.module';
@@ -19,6 +20,7 @@ import { UserModule } from './user/user.module';
     AuthModule,
     MonitorModule,
     SchedulerModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
