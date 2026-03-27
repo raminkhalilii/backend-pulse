@@ -391,3 +391,4 @@ dokcer-compose.yml
 .env
 /generated/prisma
 /dist
+.claude

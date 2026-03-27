@@ -1,7 +1,7 @@
 import { PrismaService } from '../../prisma/prisma';
 import { IMonitorRepository } from '../monitor/monitor.repository.interface';
 import { Injectable } from '@nestjs/common';
-import { Monitor } from '../../generated/prisma/client';
+import { Monitor, MonitorFrequency } from '../../generated/prisma/client';
 import { UpdateMonitorDto } from 'src/auth/dto/update-monitor-dto';
 import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
 
@@ -29,6 +29,15 @@ export class MonitorRepository implements IMonitorRepository {
   async findById(id: string): Promise<Monitor | null> {
     return this.prisma.monitor.findUnique({
       where: { id },
+    });
+  }
+
+  async findActiveByFrequencies(frequencies: MonitorFrequency[]): Promise<Monitor[]> {
+    return this.prisma.monitor.findMany({
+      where: {
+        isActive: true,
+        frequency: { in: frequencies },
+      },
     });
   }
   async update(id: string, userId: string, data: UpdateMonitorDto): Promise<Monitor | null> {

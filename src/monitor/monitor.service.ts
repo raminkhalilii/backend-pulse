@@ -1,6 +1,7 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { type IMonitorRepository, MONITOR_REPOSITORY_TOKEN } from './monitor.repository.interface';
 import * as dns from 'node:dns/promises';
+import { Monitor, MonitorFrequency } from '../../generated/prisma/client';
 import { UpdateMonitorDto } from '../auth/dto/update-monitor-dto';
 import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
 
@@ -55,5 +56,9 @@ export class MonitorService {
 
     // 2. Pass the safe data to the database
     return this.monitorRepository.update(id, userId, updateMonitorDto);
+  }
+
+  async findDueMonitors(frequencies: MonitorFrequency[]): Promise<Monitor[]> {
+    return this.monitorRepository.findActiveByFrequencies(frequencies);
   }
 }

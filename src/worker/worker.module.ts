@@ -1,0 +1,19 @@
+import { BullModule } from '@nestjs/bullmq';
+import { Module } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma';
+import { MONITOR_QUEUE } from '../queue/queue.constants';
+import { MonitorProcessor } from './processors/monitor.processor';
+
+@Module({
+  imports: [
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST ?? 'localhost',
+        port: Number.parseInt(process.env.REDIS_PORT ?? '6379', 10),
+      },
+    }),
+    BullModule.registerQueue({ name: MONITOR_QUEUE }),
+  ],
+  providers: [MonitorProcessor, PrismaService],
+})
+export class WorkerModule {}
