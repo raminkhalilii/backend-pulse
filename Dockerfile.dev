@@ -1,0 +1,20 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Install deps first — this layer is cached until package*.json changes
+COPY package*.json ./
+RUN npm ci
+
+# Copy source and prisma schema (src/ is bind-mounted in dev compose, but
+# we copy here so the image works standalone and for CI builds)
+COPY . .
+
+# Generate the Prisma client from the schema
+RUN npx prisma generate
+
+EXPOSE 3000
+
+# Default: run the API with hot-reload.
+# The worker service overrides this in docker-compose.yml.
+CMD ["npm", "run", "start:dev"]
