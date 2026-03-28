@@ -44,7 +44,7 @@ export class MonitorService {
     return this.monitorRepository.findAllByUserId(userId);
   }
 
-  async create(userId: string, createMonitorDto: CreateMonitorDto) {
+  async create(userId: string, createMonitorDto: CreateMonitorDto): Promise<Monitor> {
     // 1. Run the security check. If it fails, it throws an error and execution stops here.
     await this.validateUrlSecurity(createMonitorDto.url);
 
@@ -52,7 +52,11 @@ export class MonitorService {
     return this.monitorRepository.create(userId, createMonitorDto);
   }
 
-  async update(id: string, userId: string, updateMonitorDto: UpdateMonitorDto) {
+  async update(
+    id: string,
+    userId: string,
+    updateMonitorDto: UpdateMonitorDto,
+  ): Promise<Monitor | null> {
     // 1. Only run the DNS check if the user is actually trying to change the URL
     if (updateMonitorDto.url) {
       await this.validateUrlSecurity(updateMonitorDto.url);

@@ -5,6 +5,7 @@ import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
 import { UpdateMonitorDto } from '../auth/dto/update-monitor-dto';
 import { GetUserId } from '../auth/get-user.decorator';
 import { MonitorService } from './monitor.service';
+import { Monitor } from '../../generated/prisma/client';
 
 @ApiTags('monitors') // Groups in Swagger
 @ApiBearerAuth() // Adds the lock icon in Swagger to input the JWT
@@ -16,7 +17,7 @@ export class MonitorController {
   @Get()
   @ApiOperation({ summary: 'Get all monitors for the authenticated user' })
   @ApiResponse({ status: 200, description: 'List of monitors.' })
-  findAll(@GetUserId() userId: string) {
+  findAll(@GetUserId() userId: string): Promise<Monitor[]> {
     return this.monitorService.findAll(userId);
   }
 
@@ -24,7 +25,10 @@ export class MonitorController {
   @ApiOperation({ summary: 'Create a new monitor' })
   @ApiResponse({ status: 201, description: 'Monitor successfully created.' })
   @ApiResponse({ status: 400, description: 'Bad Request (Validation failed or SSRF prevented).' })
-  create(@Body() createMonitorDto: CreateMonitorDto, @GetUserId() userId: string) {
+  create(
+    @Body() createMonitorDto: CreateMonitorDto,
+    @GetUserId() userId: string,
+  ): Promise<Monitor> {
     // We pass both the validated body AND the securely extracted user ID to the service
     return this.monitorService.create(userId, createMonitorDto);
   }
@@ -37,7 +41,7 @@ export class MonitorController {
     @Param('id') id: string, // Extracts the URL parameter (e.g., /monitors/123)
     @Body() updateMonitorDto: UpdateMonitorDto,
     @GetUserId() userId: string,
-  ) {
+  ): Promise<Monitor | null> {
     // SECURITY: We MUST pass the userId down to the service during an update.
     // The service needs to verify that the monitor being updated actually belongs to this user!
     return this.monitorService.update(id, userId, updateMonitorDto);

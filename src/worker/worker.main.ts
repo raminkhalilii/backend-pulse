@@ -12,4 +12,4 @@ async function bootstrap() {
   console.log('Worker Node is running and listening on monitor-queue…');
 }
 
-bootstrap();
+void bootstrap();
