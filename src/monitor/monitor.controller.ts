@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Patch, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Get, Patch, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
@@ -12,6 +12,13 @@ import { MonitorService } from './monitor.service';
 @Controller('monitors')
 export class MonitorController {
   constructor(private readonly monitorService: MonitorService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Get all monitors for the authenticated user' })
+  @ApiResponse({ status: 200, description: 'List of monitors.' })
+  findAll(@GetUserId() userId: string) {
+    return this.monitorService.findAll(userId);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a new monitor' })

@@ -40,6 +40,10 @@ export class MonitorService {
     }
   }
 
+  async findAll(userId: string): Promise<Monitor[]> {
+    return this.monitorRepository.findAllByUserId(userId);
+  }
+
   async create(userId: string, createMonitorDto: CreateMonitorDto) {
     // 1. Run the security check. If it fails, it throws an error and execution stops here.
     await this.validateUrlSecurity(createMonitorDto.url);
