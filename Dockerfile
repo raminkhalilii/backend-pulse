@@ -26,6 +26,8 @@ COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
 COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
 COPY --from=builder --chown=appuser:appgroup /app/package.json ./package.json
+COPY --from=builder --chown=appuser:appgroup /app/dist/prisma.config.js ./prisma.config.js
+COPY --from=builder --chown=appuser:appgroup /app/generated ./generated
 
 USER appuser
 
