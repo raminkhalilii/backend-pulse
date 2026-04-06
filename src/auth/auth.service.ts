@@ -1,7 +1,7 @@
 import { CreateUserData } from '../user/user.repository.interface';
 import { UserService } from '../user/user.service';
 import * as bcrypt from 'bcrypt';
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '../../generated/prisma/client';
 export interface AuthTokens {
@@ -36,11 +36,11 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.userService.userFindByEmail(email);
     if (!user) {
-      throw new Error('User not found');
+      throw new UnauthorizedException('Invalid email or password.');
     }
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      throw new Error('Password is incorrect');
+      throw new UnauthorizedException('Invalid email or password.');
     }
     return user;
   }

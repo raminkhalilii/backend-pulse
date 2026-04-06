@@ -16,10 +16,10 @@ export class CreateMonitorDto {
   name: string;
 
   @ApiProperty({
-    description: 'The exact URL to be pinged',
-    example: 'https://google.com',
+    description: 'The URL to be pinged (protocol optional; https:// will be prepended if missing)',
+    example: 'google.com or https://api.example.com',
   })
-  @IsUrl({ require_tld: true, require_protocol: true })
+  @IsUrl({ require_tld: true, require_protocol: false })
   @IsNotEmpty()
   url: string;
 

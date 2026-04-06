@@ -10,6 +10,15 @@ export class MonitorService {
   constructor(
     @Inject(MONITOR_REPOSITORY_TOKEN) private readonly monitorRepository: IMonitorRepository,
   ) {}
+
+  private normalizeUrl(url: string): string {
+    // If URL doesn't start with http:// or https://, prepend https://
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return `https://${url}`;
+    }
+    return url;
+  }
+
   private isPrivateIP(ip: string): boolean {
     const parts = ip.split('.').map(Number);
     if (parts.length !== 4) return false;
@@ -67,11 +76,17 @@ export class MonitorService {
   }
 
   async create(userId: string, createMonitorDto: CreateMonitorDto): Promise<Monitor> {
-    // 1. Run the security check. If it fails, it throws an error and execution stops here.
-    await this.validateUrlSecurity(createMonitorDto.url);
+    // 1. Normalize the URL (prepend https:// if missing)
+    const normalizedUrl = this.normalizeUrl(createMonitorDto.url);
 
-    // 2. If we reach this line, the URL is safe. Save it to the database.
-    return this.monitorRepository.create(userId, createMonitorDto);
+    // 2. Run the security check. If it fails, it throws an error and execution stops here.
+    await this.validateUrlSecurity(normalizedUrl);
+
+    // 3. If we reach this line, the URL is safe. Save it to the database with the normalized URL.
+    return this.monitorRepository.create(userId, {
+      ...createMonitorDto,
+      url: normalizedUrl,
+    });
   }
 
   async update(
@@ -79,13 +94,19 @@ export class MonitorService {
     userId: string,
     updateMonitorDto: UpdateMonitorDto,
   ): Promise<Monitor | null> {
-    // 1. Only run the DNS check if the user is actually trying to change the URL
+    // 1. If URL is being updated, normalize it first
+    let normalizedUpdate = updateMonitorDto;
     if (updateMonitorDto.url) {
-      await this.validateUrlSecurity(updateMonitorDto.url);
+      const normalizedUrl = this.normalizeUrl(updateMonitorDto.url);
+      await this.validateUrlSecurity(normalizedUrl);
+      normalizedUpdate = {
+        ...updateMonitorDto,
+        url: normalizedUrl,
+      };
     }
 
-    // 2. Pass the safe data to the database
-    return this.monitorRepository.update(id, userId, updateMonitorDto);
+    // 2. Pass the normalized data to the database
+    return this.monitorRepository.update(id, userId, normalizedUpdate);
   }
 
   async findDueMonitors(frequencies: MonitorFrequency[]): Promise<Monitor[]> {
