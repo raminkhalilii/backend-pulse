@@ -44,6 +44,28 @@ export class MonitorService {
     return this.monitorRepository.findAllByUserId(userId);
   }
 
+  async findAllWithHistory(userId: string) {
+    const monitors = await this.monitorRepository.findAllByUserIdWithHeartbeats(userId);
+
+    return monitors.map((monitor) => {
+      const [latest] = monitor.heartbeats; // first = most recent (ordered desc)
+      const { heartbeats, ...rest } = monitor;
+
+      return {
+        ...rest,
+        latestStatus: latest?.status,
+        latestLatencyMs: latest?.latencyMs ?? null,
+        latestCheckedAt: latest?.timestamp,
+        // Reverse to chronological order (oldest → newest) for sparkline rendering
+        heartbeats: [...heartbeats].toReversed().map((h) => ({
+          status: h.status,
+          latencyMs: h.latencyMs,
+          timestamp: h.timestamp,
+        })),
+      };
+    });
+  }
+
   async create(userId: string, createMonitorDto: CreateMonitorDto): Promise<Monitor> {
     // 1. Run the security check. If it fails, it throws an error and execution stops here.
     await this.validateUrlSecurity(createMonitorDto.url);

@@ -1,5 +1,5 @@
 import { PrismaService } from '../../prisma/prisma';
-import { IMonitorRepository } from '../monitor/monitor.repository.interface';
+import { IMonitorRepository, MonitorWithHeartbeats } from '../monitor/monitor.repository.interface';
 import { Injectable } from '@nestjs/common';
 import { Monitor, MonitorFrequency } from '../../generated/prisma/client';
 import { UpdateMonitorDto } from 'src/auth/dto/update-monitor-dto';
@@ -23,6 +23,20 @@ export class MonitorRepository implements IMonitorRepository {
     return this.prisma.monitor.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findAllByUserIdWithHeartbeats(userId: string): Promise<MonitorWithHeartbeats[]> {
+    return this.prisma.monitor.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        heartbeats: {
+          select: { status: true, latencyMs: true, timestamp: true },
+          orderBy: { timestamp: 'desc' },
+          take: 10,
+        },
+      },
     });
   }
 

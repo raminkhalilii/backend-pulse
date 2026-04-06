@@ -1,10 +1,19 @@
 import { UpdateMonitorDto } from '../auth/dto/update-monitor-dto';
 import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
-import { Monitor, MonitorFrequency } from '../../generated/prisma/client';
+import { Monitor, MonitorFrequency, PingStatus } from '../../generated/prisma/client';
+
+export interface HeartbeatSnapshot {
+  status: PingStatus;
+  latencyMs: number | null;
+  timestamp: Date;
+}
+
+export type MonitorWithHeartbeats = Monitor & { heartbeats: HeartbeatSnapshot[] };
 
 export interface IMonitorRepository {
   findById(id: string): Promise<Monitor | null>;
   findAllByUserId(userId: string): Promise<Monitor[]>;
+  findAllByUserIdWithHeartbeats(userId: string): Promise<MonitorWithHeartbeats[]>;
   findActiveByFrequencies(frequencies: MonitorFrequency[]): Promise<Monitor[]>;
   create(userId: string, data: CreateMonitorDto): Promise<Monitor>;
   delete(id: string, userId: string): Promise<boolean>;

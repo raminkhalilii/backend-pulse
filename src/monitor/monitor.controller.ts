@@ -5,7 +5,7 @@ import { CreateMonitorDto } from '../auth/dto/create-monitor-dto';
 import { UpdateMonitorDto } from '../auth/dto/update-monitor-dto';
 import { GetUserId } from '../auth/get-user.decorator';
 import { MonitorService } from './monitor.service';
-import { Monitor } from '../../generated/prisma/client';
+import type { Monitor } from '../../generated/prisma/client';
 
 @ApiTags('monitors') // Groups in Swagger
 @ApiBearerAuth() // Adds the lock icon in Swagger to input the JWT
@@ -15,10 +15,10 @@ export class MonitorController {
   constructor(private readonly monitorService: MonitorService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get all monitors for the authenticated user' })
-  @ApiResponse({ status: 200, description: 'List of monitors.' })
-  findAll(@GetUserId() userId: string): Promise<Monitor[]> {
-    return this.monitorService.findAll(userId);
+  @ApiOperation({ summary: 'Get all monitors with last 10 heartbeats for the authenticated user' })
+  @ApiResponse({ status: 200, description: 'List of monitors with heartbeat history.' })
+  findAll(@GetUserId() userId: string) {
+    return this.monitorService.findAllWithHistory(userId);
   }
 
   @Post()
