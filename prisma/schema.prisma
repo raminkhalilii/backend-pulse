@@ -25,17 +25,36 @@ enum PingStatus {
   DOWN
 }
 
+enum OAuthProvider {
+  GOOGLE
+  GITHUB
+}
+
 model User {
   id           String  @id @default(uuid())
   email        String  @unique
   name         String
-  password     String
+  password     String? // Nullable: OAuth users have no password
   refreshToken String? // Stores the currently valid refresh token for JWT
 
-  monitors Monitor[]
+  monitors      Monitor[]
+  oauthAccounts OAuthAccount[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model OAuthAccount {
+  id                String        @id @default(uuid())
+  userId            String
+  provider          OAuthProvider
+  providerAccountId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Monitor {
