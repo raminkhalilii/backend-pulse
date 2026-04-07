@@ -72,7 +72,7 @@ export class AuthController {
   ): Promise<void> {
     const tokens = await this.authService.handleOAuthLogin(req.user);
     this.setRefreshTokenCookie(res, tokens.refreshToken);
-    res.redirect(`${process.env.FRONTEND_URL}/callback?access_token=${tokens.accessToken}`);
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?access_token=${tokens.accessToken}`);
   }
 
   // ── GitHub OAuth ──────────────────────────────────────────────────────────
@@ -93,6 +93,6 @@ export class AuthController {
   ): Promise<void> {
     const tokens = await this.authService.handleOAuthLogin(req.user);
     this.setRefreshTokenCookie(res, tokens.refreshToken);
-    res.redirect(`${process.env.FRONTEND_URL}/callback?access_token=${tokens.accessToken}`);
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?access_token=${tokens.accessToken}`);
   }
 }
