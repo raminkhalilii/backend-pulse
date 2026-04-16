@@ -14,6 +14,17 @@ datasource db {
   provider = "postgresql"
 }
 
+enum AlertEventType {
+  DOWN
+  RECOVERY
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 enum MonitorFrequency {
   ONE_MIN    @map("1m")
   FIVE_MIN   @map("5m")
@@ -65,10 +76,16 @@ model Monitor {
   frequency MonitorFrequency @default(ONE_MIN)
   isActive  Boolean          @default(true) // Ability to pause a monitor
 
+  consecutiveFailures Int        @default(0)
+  alertThreshold      Int        @default(2)
+  lastAlertedAt       DateTime?
+  lastStatus          PingStatus?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  heartbeats Heartbeat[]
-  summaries  HourlySummary[]
+  heartbeats  Heartbeat[]
+  summaries   HourlySummary[]
+  alertEvents AlertEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -102,4 +119,17 @@ model HourlySummary {
   createdAt DateTime @default(now())
 
   @@unique([monitorId, hour]) // A monitor can only have one summary per specific hour
+}
+
+model AlertEvent {
+  id             String         @id @default(uuid())
+  monitorId      String
+  type           AlertEventType
+  triggeredAt    DateTime       @default(now())
+  deliveryStatus DeliveryStatus @default(PENDING)
+  metadata       Json?
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId, triggeredAt(sort: Desc)])
 }

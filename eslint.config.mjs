@@ -7,7 +7,11 @@ import eslintPluginUnicorn from 'eslint-plugin-unicorn';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    ignores: ['eslint.config.mjs',
+      "**/*.spec.js",
+      "**/*.spec.ts",
+      "**/*.spec.jsx",
+      "**/*.spec.tsx",],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -35,6 +39,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'warn',
       'unicorn/prefer-top-level-await': 'off',
       'unicorn/prevent-abbreviations': 'off',
+      'unicorn/consistent-destructuring':'off',
       'unicorn/no-null': 'off',
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
     },

@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma';
+import { AlertModule } from '../alert/alert.module';
 import { MONITOR_QUEUE } from '../queue/queue.constants';
 import { MonitorProcessor } from './processors/monitor.processor';
 import { RedisPublisherService } from './redis-publisher.service';
@@ -15,6 +16,7 @@ import { RedisPublisherService } from './redis-publisher.service';
       },
     }),
     BullModule.registerQueue({ name: MONITOR_QUEUE }),
+    AlertModule,
   ],
   providers: [MonitorProcessor, PrismaService, RedisPublisherService],
 })

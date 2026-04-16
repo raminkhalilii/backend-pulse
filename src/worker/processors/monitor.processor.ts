@@ -3,8 +3,9 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PingStatus } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../prisma/prisma';
-import { MONITOR_UPDATED_CHANNEL } from '../../events/events.constants';
+import { AlertEngineService } from '../../alert/alert-engine.service';
 import { assertPublicUrl } from '../../common/ssrf.util';
+import { MONITOR_UPDATED_CHANNEL } from '../../events/events.constants';
 import { MonitorJobPayload } from '../../monitor/monitor-dispatcher.service';
 import { MONITOR_QUEUE } from '../../queue/queue.constants';
 import { RedisPublisherService } from '../redis-publisher.service';
@@ -22,6 +23,7 @@ export class MonitorProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisPublisher: RedisPublisherService,
+    private readonly alertEngine: AlertEngineService,
   ) {
     super();
   }
@@ -48,9 +50,22 @@ export class MonitorProcessor extends WorkerHost {
     }
 
     // 3. Persist the heartbeat regardless of outcome.
-    await this.prisma.heartbeat.create({
+    const heartbeat = await this.prisma.heartbeat.create({
       data: { monitorId, status: result.status, latencyMs: result.latencyMs },
     });
+
+    // 3a. Fetch the current monitor state and run the alert engine.
+    //     A fresh SELECT is required because the job payload only carries
+    //     monitorId+url; consecutiveFailures and lastStatus must be current.
+    const monitor = await this.prisma.monitor.findUniqueOrThrow({ where: { id: monitorId } });
+    try {
+      await this.alertEngine.processHeartbeat(heartbeat, monitor);
+    } catch (error) {
+      // Alert engine errors must not prevent the WebSocket publish below.
+      this.logger.error(
+        `[Job ${job.id}] Alert engine error for monitorId=${monitorId}: ${(error as Error).message}`,
+      );
+    }
 
     // 4. Publish the result so the API Gateway can push it to WebSocket clients.
     await this.redisPublisher.publish(MONITOR_UPDATED_CHANNEL, {
