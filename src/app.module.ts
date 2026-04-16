@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
 import { MonitorModule } from './monitor/monitor.module';
+import { NotificationModule } from './notification/notification.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { UserModule } from './user/user.module';
 
@@ -22,6 +23,7 @@ import { UserModule } from './user/user.module';
     MonitorModule,
     SchedulerModule,
     EventsModule,
+    NotificationModule, // Registers AlertChannelController + AlertDeliveryConsumer
   ],
   controllers: [AppController],
   providers: [AppService],

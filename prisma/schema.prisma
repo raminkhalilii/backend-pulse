@@ -41,6 +41,13 @@ enum OAuthProvider {
   GITHUB
 }
 
+enum AlertChannelType {
+  EMAIL
+  WEBHOOK
+  SLACK
+  DISCORD
+}
+
 model User {
   id           String  @id @default(uuid())
   email        String  @unique
@@ -48,8 +55,9 @@ model User {
   password     String? // Nullable: OAuth users have no password
   refreshToken String? // Stores the currently valid refresh token for JWT
 
-  monitors      Monitor[]
-  oauthAccounts OAuthAccount[]
+  monitors       Monitor[]
+  oauthAccounts  OAuthAccount[]
+  alertChannels  AlertChannel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,4 +140,20 @@ model AlertEvent {
   monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
 
   @@index([monitorId, triggeredAt(sort: Desc)])
+}
+
+model AlertChannel {
+  id      String           @id @default(uuid())
+  userId  String
+  type    AlertChannelType
+  value   String           // Email address, webhook URL, etc.
+  label   String?          // Optional friendly name e.g. "Work email"
+  enabled Boolean          @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
