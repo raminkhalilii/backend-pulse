@@ -9,12 +9,16 @@ import {
   PingStatus,
 } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma';
+import { AlertSettingsService } from '../alert-settings/alert-settings.service';
+import { QuietHoursService } from '../alert-settings/quiet-hours.service';
 import { ALERT_DELIVERY_QUEUE } from '../queue/queue.constants';
 
 export interface AlertDeliveryPayload {
   alertEventId: string;
   monitorId: string;
   type: AlertEventType;
+  /** true when this job targets escalation channels only */
+  isEscalation?: boolean;
 }
 
 @Injectable()
@@ -23,39 +27,83 @@ export class AlertEngineService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly alertSettingsService: AlertSettingsService,
+    private readonly quietHoursService: QuietHoursService,
     @InjectQueue(ALERT_DELIVERY_QUEUE) private readonly alertQueue: Queue,
   ) {}
 
   async processHeartbeat(heartbeat: Heartbeat, monitor: Monitor): Promise<void> {
     const { status } = heartbeat;
-    const { id: monitorId, lastStatus, consecutiveFailures, alertThreshold } = monitor;
+    const { id: monitorId, lastStatus, consecutiveFailures } = monitor;
 
-    // ── a) Consecutive failure tracking ──────────────────────────────────────
-    const createConsecutiveFailures = status === PingStatus.DOWN ? consecutiveFailures + 1 : 0;
+    // ── a) Load per-monitor settings (null → engine uses safe defaults) ───────
+    const settings = await this.alertSettingsService.getSettingsForMonitor(monitorId);
+    const effectiveThreshold = settings?.alertThreshold ?? monitor.alertThreshold;
+    const escalationThreshold = settings?.escalationThreshold ?? 5;
 
-    // ── b) State transition detection ─────────────────────────────────────────
-    // Recovery: monitor just came back UP after being DOWN
+    // ── b) Consecutive failure tracking ───────────────────────────────────────
+    const nextConsecutiveFailures = status === PingStatus.DOWN ? consecutiveFailures + 1 : 0;
+
+    // ── c) State-transition flags ─────────────────────────────────────────────
     const isRecovery = status === PingStatus.UP && lastStatus === PingStatus.DOWN;
-
-    // shouldCheckDownAlert: status is DOWN and we've accumulated enough failures.
-    // The dedup query inside the transaction acts as the "first occurrence" gate,
-    // replacing the isNewOutage flag (which has a logical contradiction for
-    // alertThreshold > 1 — see plan for details).
     const shouldCheckDownAlert =
-      status === PingStatus.DOWN && createConsecutiveFailures >= alertThreshold;
+      status === PingStatus.DOWN && nextConsecutiveFailures >= effectiveThreshold;
 
-    // ── c + d + e + f) Atomic block ───────────────────────────────────────────
-    // The transaction returns the fired alert payload (or null if no alert was
-    // triggered). Returning a value — rather than mutating outer let variables —
-    // lets TypeScript's control flow analysis track the type correctly after the
-    // async callback completes.
-    const firedAlert = await this.prisma.$transaction(
-      async (tx): Promise<AlertDeliveryPayload | null> => {
-        // ── DOWN path ───────────────────────────────────────────────────────
+    // ── d) Quiet-hours gate ───────────────────────────────────────────────────
+    // Applies to any heartbeat that WOULD produce an AlertEvent. If suppressed,
+    // we still advance consecutiveFailures and write a SuppressedAlert audit row.
+    const inQuietHours = settings ? this.quietHoursService.isInQuietHours(settings) : false;
+
+    if (inQuietHours && (shouldCheckDownAlert || isRecovery)) {
+      this.logger.warn(
+        `Alert suppressed for monitor ${monitorId} — quiet hours active` +
+          (settings?.quietHoursEnd ? ` (resumes at ${settings.quietHoursEnd} UTC)` : ''),
+      );
+
+      await this.prisma.monitor.update({
+        where: { id: monitorId },
+        data: { consecutiveFailures: nextConsecutiveFailures, lastStatus: status },
+      });
+
+      // Fire-and-forget audit log — never let this mask the heartbeat
+      void this.prisma.suppressedAlert
+        .create({
+          data: {
+            monitorId,
+            type: isRecovery ? AlertEventType.RECOVERY : AlertEventType.DOWN,
+            reason: 'quiet_hours',
+            quietHoursEnd: settings?.quietHoursEnd ?? null,
+          },
+        })
+        .catch((error: unknown) => {
+          this.logger.error(
+            `Failed to write SuppressedAlert for monitorId=${monitorId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+
+      return;
+    }
+
+    // ── e) Pre-fetch escalation channels (outside transaction for scope clarity) ─
+    // Only bother if the current heartbeat could trigger both a DOWN alert AND
+    // the escalation threshold.
+    const shouldCheckEscalation =
+      shouldCheckDownAlert && nextConsecutiveFailures >= escalationThreshold;
+
+    const escalationChannels = shouldCheckEscalation
+      ? await this.alertSettingsService.getChannelsForMonitor(monitorId, true)
+      : [];
+
+    // ── f) Atomic block ───────────────────────────────────────────────────────
+    // Returns the list of payloads to enqueue after the transaction commits.
+    const firedAlerts = await this.prisma.$transaction(
+      async (tx): Promise<AlertDeliveryPayload[]> => {
+        // ── DOWN path ─────────────────────────────────────────────────────────
         if (shouldCheckDownAlert) {
-          // d) Dedup: find the most recent AlertEvent for this monitor.
-          //    If it is a DOWN (with no RECOVERY after it), an outage is already
-          //    open — skip creating a duplicate.
+          // Dedup: find the most recent AlertEvent for this monitor.
+          // If it is already DOWN (no RECOVERY after it), an outage is open — skip.
           const mostRecent = await tx.alertEvent.findFirst({
             where: { monitorId },
             orderBy: { triggeredAt: 'desc' },
@@ -63,88 +111,131 @@ export class AlertEngineService {
           const openOutageExists = mostRecent?.type === AlertEventType.DOWN;
 
           if (!openOutageExists) {
-            // e) Create the DOWN AlertEvent
+            const results: AlertDeliveryPayload[] = [];
+
+            // Normal DOWN alert
             const evt = await tx.alertEvent.create({
               data: {
                 monitorId,
                 type: AlertEventType.DOWN,
                 deliveryStatus: DeliveryStatus.PENDING,
                 metadata: {
-                  consecutiveFailures: createConsecutiveFailures,
+                  consecutiveFailures: nextConsecutiveFailures,
                   latencyMs: heartbeat.latencyMs,
                 },
               },
             });
 
-            // f) Update monitor atomically with the AlertEvent creation
             await tx.monitor.update({
               where: { id: monitorId },
               data: {
-                consecutiveFailures: createConsecutiveFailures,
+                consecutiveFailures: nextConsecutiveFailures,
                 lastStatus: status,
                 lastAlertedAt: new Date(),
               },
             });
 
-            return { alertEventId: evt.id, monitorId, type: AlertEventType.DOWN };
+            results.push({
+              alertEventId: evt.id,
+              monitorId,
+              type: AlertEventType.DOWN,
+              isEscalation: false,
+            });
+
+            // ── Escalation path ───────────────────────────────────────────────
+            // Fires in the same transaction only when the DOWN alert itself fires
+            // AND escalation channels are configured.
+            if (escalationChannels.length > 0) {
+              const escalEvt = await tx.alertEvent.create({
+                data: {
+                  monitorId,
+                  type: AlertEventType.DOWN,
+                  deliveryStatus: DeliveryStatus.PENDING,
+                  metadata: {
+                    consecutiveFailures: nextConsecutiveFailures,
+                    latencyMs: heartbeat.latencyMs,
+                    isEscalation: true,
+                  },
+                },
+              });
+
+              results.push({
+                alertEventId: escalEvt.id,
+                monitorId,
+                type: AlertEventType.DOWN,
+                isEscalation: true,
+              });
+            }
+
+            return results;
           }
         }
 
-        // ── RECOVERY path ────────────────────────────────────────────────────
+        // ── RECOVERY path ─────────────────────────────────────────────────────
         if (isRecovery) {
+          // g) Recovery gate: if alertOnRecovery is disabled, reset state silently.
+          if (settings && !settings.alertOnRecovery) {
+            await tx.monitor.update({
+              where: { id: monitorId },
+              data: { consecutiveFailures: nextConsecutiveFailures, lastStatus: status },
+            });
+            return [];
+          }
+
           const evt = await tx.alertEvent.create({
             data: {
               monitorId,
               type: AlertEventType.RECOVERY,
               deliveryStatus: DeliveryStatus.PENDING,
-              metadata: {
-                latencyMs: heartbeat.latencyMs,
-              },
+              metadata: { latencyMs: heartbeat.latencyMs },
             },
           });
 
-          // f) Update monitor atomically with the AlertEvent creation
           await tx.monitor.update({
             where: { id: monitorId },
             data: {
-              consecutiveFailures: createConsecutiveFailures,
+              consecutiveFailures: nextConsecutiveFailures,
               lastStatus: status,
               lastAlertedAt: new Date(),
             },
           });
 
-          return { alertEventId: evt.id, monitorId, type: AlertEventType.RECOVERY };
+          return [
+            {
+              alertEventId: evt.id,
+              monitorId,
+              type: AlertEventType.RECOVERY,
+              isEscalation: false,
+            },
+          ];
         }
 
-        // f) No alert fired — still update consecutive failures and last status
+        // ── No alert — still update consecutive failures and last status ───────
         await tx.monitor.update({
           where: { id: monitorId },
-          data: {
-            consecutiveFailures: createConsecutiveFailures,
-            lastStatus: status,
-          },
+          data: { consecutiveFailures: nextConsecutiveFailures, lastStatus: status },
         });
 
-        return null;
+        return [];
       },
     );
 
-    // ── g) Enqueue delivery job ───────────────────────────────────────────────
-    // Done outside the transaction so a Redis failure doesn't roll back the DB
-    // writes. If enqueue fails, the AlertEvent remains PENDING and can be
-    // retried by a background sweep later.
-    if (firedAlert !== null) {
+    // ── h) Enqueue delivery jobs ───────────────────────────────────────────────
+    // Done outside the transaction so a Redis failure doesn't roll back DB writes.
+    // If enqueue fails, the AlertEvent remains PENDING and can be retried later.
+    for (const payload of firedAlerts) {
       try {
-        await this.alertQueue.add('deliver-alert', firedAlert satisfies AlertDeliveryPayload);
+        await this.alertQueue.add('deliver-alert', payload satisfies AlertDeliveryPayload);
 
         this.logger.log(
-          `Alert enqueued — monitorId=${firedAlert.monitorId} type=${firedAlert.type} alertEventId=${firedAlert.alertEventId}`,
+          `Alert enqueued — monitorId=${payload.monitorId} type=${payload.type}` +
+            ` alertEventId=${payload.alertEventId} isEscalation=${payload.isEscalation ?? false}`,
         );
       } catch (error) {
-        // Do NOT rethrow. The AlertEvent stays PENDING in the DB so a future
-        // retry sweep can pick it up without losing the audit record.
         this.logger.error(
-          `Failed to enqueue alert-delivery for alertEventId=${firedAlert.alertEventId}: ${(error as Error).message}`,
+          `Failed to enqueue alert-delivery for alertEventId=${payload.alertEventId}: ${
+            (error as Error).message
+          }`,
         );
       }
     }

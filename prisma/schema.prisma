@@ -97,9 +97,12 @@ model Monitor {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  heartbeats  Heartbeat[]
-  summaries   HourlySummary[]
-  alertEvents AlertEvent[]
+  heartbeats        Heartbeat[]
+  summaries         HourlySummary[]
+  alertEvents       AlertEvent[]
+  alertSettings     MonitorAlertSettings?
+  alertChannelLinks MonitorAlertChannel[]
+  suppressedAlerts  SuppressedAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -161,11 +164,70 @@ model AlertChannel {
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   webhookDeliveryLogs WebhookDeliveryLog[]
+  monitorLinks        MonitorAlertChannel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+// ── Phase 5: Per-monitor alert settings ───────────────────────────────────────
+
+/// Per-monitor alert configuration. Created lazily on first access; if absent,
+/// the engine falls back to Monitor.alertThreshold and safe defaults.
+model MonitorAlertSettings {
+  id                  String  @id @default(uuid())
+  monitorId           String  @unique
+  /// Override the monitor-level threshold for DOWN alerts.
+  alertThreshold      Int     @default(2)
+  /// After this many consecutive failures an escalation alert fires (must be > alertThreshold).
+  escalationThreshold Int     @default(5)
+  /// Send a RECOVERY alert when the monitor comes back UP.
+  alertOnRecovery     Boolean @default(true)
+  quietHoursEnabled   Boolean @default(false)
+  /// UTC time string "HH:MM". Required when quietHoursEnabled is true.
+  quietHoursStart     String?
+  /// UTC time string "HH:MM". Required when quietHoursEnabled is true.
+  quietHoursEnd       String?
+  /// JSON array of day-of-week numbers [0–6] where 0 = Sunday. Defaults to all 7 days.
+  quietHoursDays      Json    @default("[0,1,2,3,4,5,6]")
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Junction table: links a monitor to its chosen alert channels.
+/// isEscalation=true channels only fire once consecutiveFailures >= escalationThreshold.
+model MonitorAlertChannel {
+  id             String  @id @default(uuid())
+  monitorId      String
+  alertChannelId String
+  isEscalation   Boolean @default(false)
+
+  monitor      Monitor      @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  alertChannel AlertChannel @relation(fields: [alertChannelId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([monitorId, alertChannelId])
+  @@index([monitorId])
+}
+
+/// Audit log for alerts suppressed by the quiet-hours gate.
+model SuppressedAlert {
+  id            String         @id @default(uuid())
+  monitorId     String
+  type          AlertEventType
+  suppressedAt  DateTime       @default(now())
+  reason        String         // e.g. "quiet_hours"
+  quietHoursEnd String?        // "HH:MM" — when alerts resume
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId, suppressedAt(sort: Desc)])
 }
 
 model WebhookDeliveryLog {

@@ -2,11 +2,13 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
+  AlertChannel,
   AlertChannelType,
   AlertEventType,
   DeliveryStatus,
   PlatformType,
 } from '../../generated/prisma/client';
+import { AlertSettingsService } from '../alert-settings/alert-settings.service';
 import { PrismaService } from '../../prisma/prisma';
 import { AlertDeliveryPayload } from '../alert/alert-engine.service';
 import { ALERT_DELIVERY_QUEUE } from '../queue/queue.constants';
@@ -23,6 +25,7 @@ export class AlertDeliveryConsumer extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly alertSettingsService: AlertSettingsService,
     private readonly emailService: EmailService,
     private readonly webhookService: WebhookService,
     private readonly slackService: SlackService,
@@ -39,10 +42,10 @@ export class AlertDeliveryConsumer extends WorkerHost {
   }
 
   private async processAlertDelivery(job: Job<AlertDeliveryPayload>): Promise<void> {
-    const { alertEventId } = job.data;
+    const { alertEventId, monitorId, isEscalation } = job.data;
 
     this.logger.log(
-      `Processing alert delivery — alertEventId=${alertEventId} attempt=${job.attemptsMade + 1}`,
+      `Processing alert delivery — alertEventId=${alertEventId} isEscalation=${isEscalation ?? false} attempt=${job.attemptsMade + 1}`,
     );
 
     // ── a) Load AlertEvent with its monitor and the monitor's owner ───────────
@@ -63,21 +66,30 @@ export class AlertDeliveryConsumer extends WorkerHost {
     const { monitor } = alertEvent;
     const { user } = monitor;
 
-    // ── b) Load all enabled channels in parallel ──────────────────────────────
-    const [emailChannels, webhookChannels, slackChannels, discordChannels] = await Promise.all([
-      this.prisma.alertChannel.findMany({
-        where: { userId: user.id, type: AlertChannelType.EMAIL, enabled: true },
-      }),
-      this.prisma.alertChannel.findMany({
-        where: { userId: user.id, type: AlertChannelType.WEBHOOK, enabled: true },
-      }),
-      this.prisma.alertChannel.findMany({
-        where: { userId: user.id, type: AlertChannelType.SLACK, enabled: true },
-      }),
-      this.prisma.alertChannel.findMany({
-        where: { userId: user.id, type: AlertChannelType.DISCORD, enabled: true },
-      }),
-    ]);
+    // ── b) Per-monitor channel routing ────────────────────────────────────────
+    // Load only channels linked to THIS monitor (normal or escalation depending
+    // on the job flag). If the monitor has NO linked channels, fall back to all
+    // of the user's enabled channels so existing behaviour is preserved.
+    let allChannels = await this.alertSettingsService.getChannelsForMonitor(
+      monitorId,
+      isEscalation ?? false,
+    );
+
+    if (allChannels.length === 0) {
+      this.logger.warn(
+        `Monitor ${monitorId} has no specific channels — using all user channels (userId=${user.id})`,
+      );
+      // Fallback: load every enabled channel the user owns (original behaviour)
+      allChannels = await this.prisma.alertChannel.findMany({
+        where: { userId: user.id, enabled: true },
+      });
+    }
+
+    // Split by type for type-specific delivery logic
+    const emailChannels = allChannels.filter((c) => c.type === AlertChannelType.EMAIL);
+    const webhookChannels = allChannels.filter((c) => c.type === AlertChannelType.WEBHOOK);
+    const slackChannels = allChannels.filter((c) => c.type === AlertChannelType.SLACK);
+    const discordChannels = allChannels.filter((c) => c.type === AlertChannelType.DISCORD);
 
     const totalChannels =
       emailChannels.length + webhookChannels.length + slackChannels.length + discordChannels.length;
@@ -135,199 +147,81 @@ export class AlertDeliveryConsumer extends WorkerHost {
 
     // ── e) Deliver to WEBHOOK channels ────────────────────────────────────────
     for (const channel of webhookChannels) {
-      const deliveryStart = Date.now();
-      let deliveryStatusCode: number | undefined;
-      let deliveryError: string | undefined;
-      let success = false;
-
-      try {
-        await this.webhookService.sendWebhookAlert({
-          url: channel.value,
-          secret: channel.secret ?? undefined,
-          monitorId: monitor.id,
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          type: alertType,
-          triggeredAt: alertEvent.triggeredAt,
-          responseTimeMs,
-          errorMessage,
-          statusCode: httpStatusCode,
-        });
-
-        success = true;
-        this.logger.log(
-          `Webhook delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        deliveryError = message;
-        deliveryStatusCode = error instanceof WebhookResponseError ? error.statusCode : undefined;
-
-        this.logger.error(
-          `Webhook delivery failed — channelId=${channel.id} url=${channel.value.slice(0, 60)}: ${message}`,
-        );
-        failures.push({
-          channelId: channel.id,
-          label: channel.value.slice(0, 60),
-          error: message,
-        });
-      }
-
-      const elapsedMs = Date.now() - deliveryStart;
-
-      void this.prisma.webhookDeliveryLog
-        .create({
-          data: {
-            alertChannelId: channel.id,
-            alertEventId,
+      await this.deliverWithLog(
+        channel,
+        alertEventId,
+        PlatformType.WEBHOOK,
+        failures,
+        async () => {
+          await this.webhookService.sendWebhookAlert({
             url: channel.value,
-            statusCode: deliveryStatusCode ?? null,
-            responseTimeMs: elapsedMs,
-            success,
-            errorMessage: deliveryError ?? null,
-            platformType: PlatformType.WEBHOOK,
-          },
-        })
-        .catch((error: unknown) => {
-          this.logger.error(
-            `Failed to write WebhookDeliveryLog — channelId=${channel.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
+            secret: channel.secret ?? undefined,
+            monitorId: monitor.id,
+            monitorName: monitor.name,
+            monitorUrl: monitor.url,
+            type: alertType,
+            triggeredAt: alertEvent.triggeredAt,
+            responseTimeMs,
+            errorMessage,
+            statusCode: httpStatusCode,
+          });
+        },
+        (error) => (error instanceof WebhookResponseError ? error.statusCode : undefined),
+        `Webhook delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
+      );
     }
 
     // ── f) Deliver to SLACK channels ──────────────────────────────────────────
     for (const channel of slackChannels) {
-      const deliveryStart = Date.now();
-      let deliveryStatusCode: number | undefined;
-      let deliveryError: string | undefined;
-      let success = false;
-
-      try {
-        await this.slackService.sendSlackAlert({
-          webhookUrl: channel.value,
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          type: alertType,
-          triggeredAt: alertEvent.triggeredAt,
-          responseTimeMs,
-          errorMessage,
-          statusCode: httpStatusCode,
-          dashboardUrl,
-        });
-
-        success = true;
-        this.logger.log(
-          `Slack alert delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        deliveryError = message;
-        deliveryStatusCode = error instanceof SlackDeliveryError ? error.statusCode : undefined;
-
-        this.logger.error(
-          `Slack delivery failed — channelId=${channel.id} url=${channel.value.slice(0, 60)}: ${message}`,
-        );
-        failures.push({
-          channelId: channel.id,
-          label: channel.value.slice(0, 60),
-          error: message,
-        });
-      }
-
-      const elapsedMs = Date.now() - deliveryStart;
-
-      void this.prisma.webhookDeliveryLog
-        .create({
-          data: {
-            alertChannelId: channel.id,
-            alertEventId,
-            url: channel.value,
-            statusCode: deliveryStatusCode ?? null,
-            responseTimeMs: elapsedMs,
-            success,
-            errorMessage: deliveryError ?? null,
-            platformType: PlatformType.SLACK,
-          },
-        })
-        .catch((error: unknown) => {
-          this.logger.error(
-            `Failed to write WebhookDeliveryLog (Slack) — channelId=${channel.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
+      await this.deliverWithLog(
+        channel,
+        alertEventId,
+        PlatformType.SLACK,
+        failures,
+        async () => {
+          await this.slackService.sendSlackAlert({
+            webhookUrl: channel.value,
+            monitorName: monitor.name,
+            monitorUrl: monitor.url,
+            type: alertType,
+            triggeredAt: alertEvent.triggeredAt,
+            responseTimeMs,
+            errorMessage,
+            statusCode: httpStatusCode,
+            dashboardUrl,
+          });
+        },
+        (error) => (error instanceof SlackDeliveryError ? error.statusCode : undefined),
+        `Slack alert delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
+      );
     }
 
     // ── g) Deliver to DISCORD channels ────────────────────────────────────────
     for (const channel of discordChannels) {
-      const deliveryStart = Date.now();
-      let deliveryStatusCode: number | undefined;
-      let deliveryError: string | undefined;
-      let success = false;
-
-      try {
-        await this.discordService.sendDiscordAlert({
-          webhookUrl: channel.value,
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          type: alertType,
-          triggeredAt: alertEvent.triggeredAt,
-          responseTimeMs,
-          errorMessage,
-          statusCode: httpStatusCode,
-          dashboardUrl,
-        });
-
-        success = true;
-        this.logger.log(
-          `Discord alert delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        deliveryError = message;
-        deliveryStatusCode = error instanceof DiscordDeliveryError ? error.statusCode : undefined;
-
-        this.logger.error(
-          `Discord delivery failed — channelId=${channel.id} url=${channel.value.slice(0, 60)}: ${message}`,
-        );
-        failures.push({
-          channelId: channel.id,
-          label: channel.value.slice(0, 60),
-          error: message,
-        });
-      }
-
-      const elapsedMs = Date.now() - deliveryStart;
-
-      void this.prisma.webhookDeliveryLog
-        .create({
-          data: {
-            alertChannelId: channel.id,
-            alertEventId,
-            url: channel.value,
-            statusCode: deliveryStatusCode ?? null,
-            responseTimeMs: elapsedMs,
-            success,
-            errorMessage: deliveryError ?? null,
-            platformType: PlatformType.DISCORD,
-          },
-        })
-        .catch((error: unknown) => {
-          this.logger.error(
-            `Failed to write WebhookDeliveryLog (Discord) — channelId=${channel.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
+      await this.deliverWithLog(
+        channel,
+        alertEventId,
+        PlatformType.DISCORD,
+        failures,
+        async () => {
+          await this.discordService.sendDiscordAlert({
+            webhookUrl: channel.value,
+            monitorName: monitor.name,
+            monitorUrl: monitor.url,
+            type: alertType,
+            triggeredAt: alertEvent.triggeredAt,
+            responseTimeMs,
+            errorMessage,
+            statusCode: httpStatusCode,
+            dashboardUrl,
+          });
+        },
+        (error) => (error instanceof DiscordDeliveryError ? error.statusCode : undefined),
+        `Discord alert delivered — channelId=${channel.id} url=${channel.value.slice(0, 60)} type=${alertEvent.type}`,
+      );
     }
 
     // ── h) Update AlertEvent.deliveryStatus based on aggregate result ─────────
-    //
-    // Strategy: only mark FAILED if EVERY channel across ALL types failed.
-    // If at least one channel delivered successfully (regardless of type),
-    // mark SENT. This means a partial success still counts as delivered.
     if (failures.length < totalChannels) {
       await this.prisma.alertEvent.update({
         where: { id: alertEventId },
@@ -339,7 +233,6 @@ export class AlertDeliveryConsumer extends WorkerHost {
           `delivered=${totalChannels - failures.length}/${totalChannels}`,
       );
     } else {
-      // Every channel failed — mark FAILED and throw so BullMQ retries the job.
       await this.prisma.alertEvent.update({
         where: { id: alertEventId },
         data: { deliveryStatus: DeliveryStatus.FAILED },
@@ -354,5 +247,69 @@ export class AlertDeliveryConsumer extends WorkerHost {
         `Delivery failed for alertEventId=${alertEventId} on all ${totalChannels} channels: ${failedLabels}`,
       );
     }
+  }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Wraps platform delivery in try/catch, writes a WebhookDeliveryLog entry,
+   * and appends to the failures array on error — eliminating the repetitive
+   * boilerplate across the four channel-type loops.
+   */
+  private async deliverWithLog(
+    channel: AlertChannel,
+    alertEventId: string,
+    platformType: PlatformType,
+    failures: Array<{ channelId: string; label: string; error: string }>,
+    deliver: () => Promise<void>,
+    extractStatusCode: (error: unknown) => number | undefined,
+    successLogMessage: string,
+  ): Promise<void> {
+    const deliveryStart = Date.now();
+    let deliveryStatusCode: number | undefined;
+    let deliveryError: string | undefined;
+    let success = false;
+
+    try {
+      await deliver();
+      success = true;
+      this.logger.log(successLogMessage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deliveryError = message;
+      deliveryStatusCode = extractStatusCode(error);
+
+      this.logger.error(
+        `${platformType} delivery failed — channelId=${channel.id} url=${channel.value.slice(0, 60)}: ${message}`,
+      );
+      failures.push({
+        channelId: channel.id,
+        label: channel.value.slice(0, 60),
+        error: message,
+      });
+    }
+
+    const elapsedMs = Date.now() - deliveryStart;
+
+    void this.prisma.webhookDeliveryLog
+      .create({
+        data: {
+          alertChannelId: channel.id,
+          alertEventId,
+          url: channel.value,
+          statusCode: deliveryStatusCode ?? null,
+          responseTimeMs: elapsedMs,
+          success,
+          errorMessage: deliveryError ?? null,
+          platformType,
+        },
+      })
+      .catch((error: unknown) => {
+        this.logger.error(
+          `Failed to write WebhookDeliveryLog (${platformType}) — channelId=${channel.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
   }
 }

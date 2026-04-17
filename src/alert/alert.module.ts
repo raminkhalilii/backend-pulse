@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma';
+import { AlertSettingsModule } from '../alert-settings/alert-settings.module';
 import { ALERT_DELIVERY_QUEUE } from '../queue/queue.constants';
 import { AlertEngineService } from './alert-engine.service';
 
@@ -17,6 +18,7 @@ import { AlertEngineService } from './alert-engine.service';
         removeOnFail: 200,
       },
     }),
+    AlertSettingsModule, // AlertEngineService injects AlertSettingsService + QuietHoursService
   ],
   providers: [AlertEngineService, PrismaService],
   exports: [AlertEngineService],

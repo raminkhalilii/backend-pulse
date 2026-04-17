@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma';
+import { AlertSettingsModule } from '../alert-settings/alert-settings.module';
 import { ALERT_DELIVERY_QUEUE } from '../queue/queue.constants';
 import { AlertChannelController } from './alert-channel.controller';
 import { AlertChannelService } from './alert-channel.service';
@@ -33,6 +34,7 @@ import { WebhookService } from './webhook.service';
         removeOnFail: 200, // Keep last 200 failed jobs for debugging
       },
     }),
+    AlertSettingsModule, // AlertDeliveryConsumer injects AlertSettingsService for per-monitor routing
   ],
   controllers: [AlertChannelController],
   providers: [
