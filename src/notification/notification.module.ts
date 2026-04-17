@@ -6,6 +6,8 @@ import { AlertChannelController } from './alert-channel.controller';
 import { AlertChannelService } from './alert-channel.service';
 import { AlertDeliveryConsumer } from './alert-delivery.consumer';
 import { EmailService } from './email.service';
+import { WebhookSecurityService } from './webhook-security.service';
+import { WebhookService } from './webhook.service';
 
 @Module({
   imports: [
@@ -31,7 +33,14 @@ import { EmailService } from './email.service';
     }),
   ],
   controllers: [AlertChannelController],
-  providers: [PrismaService, EmailService, AlertDeliveryConsumer, AlertChannelService],
-  exports: [EmailService, AlertChannelService],
+  providers: [
+    PrismaService,
+    EmailService,
+    WebhookSecurityService,
+    WebhookService,
+    AlertDeliveryConsumer,
+    AlertChannelService,
+  ],
+  exports: [EmailService, WebhookService, AlertChannelService],
 })
 export class NotificationModule {}

@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import { GetUserId } from '../auth/get-user.decorator';
 import { AlertChannelService } from './alert-channel.service';
 import { CreateAlertChannelDto } from './dto/create-alert-channel.dto';
 import { UpdateAlertChannelDto } from './dto/update-alert-channel.dto';
+import { WebhookLogsQueryDto } from './dto/webhook-logs-query.dto';
 
 @ApiTags('alert-channels')
 @ApiBearerAuth()
@@ -35,13 +37,13 @@ export class AlertChannelController {
 
   @Get()
   @ApiOperation({ summary: 'List all alert channels for the authenticated user' })
-  @ApiResponse({ status: 200, description: 'Array of alert channels.' })
+  @ApiResponse({ status: 200, description: 'Array of alert channels (secret field omitted).' })
   findAll(@GetUserId() userId: string) {
     return this.alertChannelService.findAll(userId);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update label or enabled state of an alert channel' })
+  @ApiOperation({ summary: 'Update label, enabled state, or secret of an alert channel' })
   @ApiResponse({ status: 200, description: 'Channel updated.' })
   @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
   @ApiResponse({ status: 404, description: 'Channel not found.' })
@@ -61,11 +63,54 @@ export class AlertChannelController {
 
   @Post(':id/test')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Send a test alert to verify the channel is working' })
+  @ApiOperation({ summary: 'Send a test alert email to verify an EMAIL channel is working' })
   @ApiResponse({ status: 204, description: 'Test alert sent.' })
   @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
   @ApiResponse({ status: 404, description: 'Channel not found.' })
   sendTest(@Param('id') id: string, @GetUserId() userId: string) {
     return this.alertChannelService.sendTest(id, userId);
+  }
+
+  @Post(':id/test-webhook')
+  @ApiOperation({
+    summary: 'Fire a test payload to a WEBHOOK channel to verify delivery',
+    description:
+      'Sends a synthetic monitor.test event to the configured webhook URL. ' +
+      'Applies full SSRF protection. Does not create any AlertEvent or log record. ' +
+      'Returns delivery outcome — never throws on webhook-side failures.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Test result: { success, statusCode, responseTimeMs }',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Channel is not WEBHOOK type or URL is blocked by SSRF protection.',
+  })
+  @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
+  @ApiResponse({ status: 404, description: 'Channel not found.' })
+  testWebhook(@Param('id') id: string, @GetUserId() userId: string) {
+    return this.alertChannelService.testWebhookChannel(id, userId);
+  }
+
+  @Get(':id/webhook-logs')
+  @ApiOperation({
+    summary: 'Get webhook delivery logs for a channel',
+    description: 'Returns delivery attempts ordered newest-first. Use limit/offset for pagination.',
+  })
+  @ApiResponse({ status: 200, description: 'Array of WebhookDeliveryLog records.' })
+  @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
+  @ApiResponse({ status: 404, description: 'Channel not found.' })
+  getWebhookLogs(
+    @Param('id') id: string,
+    @Query() query: WebhookLogsQueryDto,
+    @GetUserId() userId: string,
+  ) {
+    return this.alertChannelService.getWebhookLogs(
+      id,
+      userId,
+      query.limit ?? 20,
+      query.offset ?? 0,
+    );
   }
 }

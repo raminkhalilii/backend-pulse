@@ -137,7 +137,8 @@ model AlertEvent {
   deliveryStatus DeliveryStatus @default(PENDING)
   metadata       Json?
 
-  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  monitor             Monitor              @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  webhookDeliveryLogs WebhookDeliveryLog[]
 
   @@index([monitorId, triggeredAt(sort: Desc)])
 }
@@ -149,11 +150,30 @@ model AlertChannel {
   value   String           // Email address, webhook URL, etc.
   label   String?          // Optional friendly name e.g. "Work email"
   enabled Boolean          @default(true)
+  secret  String?          // Optional HMAC-SHA256 signing secret (WEBHOOK channels only)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webhookDeliveryLogs WebhookDeliveryLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+model WebhookDeliveryLog {
+  id             String   @id @default(uuid())
+  alertChannelId String
+  alertEventId   String
+  url            String   // Snapshot of URL at time of delivery
+  statusCode     Int?     // HTTP response code received (null if network/timeout error)
+  responseTimeMs Int
+  success        Boolean
+  errorMessage   String?
+  attemptedAt    DateTime @default(now())
+
+  alertChannel AlertChannel @relation(fields: [alertChannelId], references: [id], onDelete: Cascade)
+  alertEvent   AlertEvent   @relation(fields: [alertEventId], references: [id], onDelete: Cascade)
+
+  @@index([alertChannelId, attemptedAt(sort: Desc)])
 }

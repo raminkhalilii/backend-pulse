@@ -9,4 +9,13 @@ export class UpdateAlertChannelDto {
   @IsString()
   @MaxLength(100)
   label?: string;
+
+  /**
+   * Update or clear the HMAC signing secret for a WEBHOOK channel.
+   * Pass an empty string or null to remove the secret.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  secret?: string | null;
 }

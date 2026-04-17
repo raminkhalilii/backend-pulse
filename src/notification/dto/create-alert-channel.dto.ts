@@ -49,4 +49,15 @@ export class CreateAlertChannelDto {
   @IsString()
   @MaxLength(100)
   label?: string;
+
+  /**
+   * Optional HMAC-SHA256 signing secret for WEBHOOK channels.
+   * When set, every outgoing request will include an
+   * X-Pulse-Signature: sha256=<hex> header so the receiving server
+   * can verify the payload is genuinely from Pulse.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  secret?: string;
 }
