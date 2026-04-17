@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -8,6 +9,21 @@ import {
   ValidationOptions,
 } from 'class-validator';
 import { AlertChannelType } from '../../../generated/prisma/client';
+
+/**
+ * Optional display metadata stored alongside SLACK and DISCORD channels.
+ * These labels are shown in the UI to help users identify channels at a glance —
+ * they are not used for delivery.
+ */
+export interface SlackPlatformMetadata {
+  workspaceName?: string;
+  channelName?: string;
+}
+
+export interface DiscordPlatformMetadata {
+  serverName?: string;
+  channelName?: string;
+}
 
 /**
  * Custom decorator: validates that `value` is a well-formed email address
@@ -60,4 +76,14 @@ export class CreateAlertChannelDto {
   @IsString()
   @MaxLength(255)
   secret?: string;
+
+  /**
+   * Optional platform-specific display metadata.
+   * SLACK channels: { workspaceName?, channelName? }
+   * DISCORD channels: { serverName?, channelName? }
+   * Not used for delivery — for display purposes only.
+   */
+  @IsOptional()
+  @IsObject()
+  platformMetadata?: SlackPlatformMetadata | DiscordPlatformMetadata;
 }

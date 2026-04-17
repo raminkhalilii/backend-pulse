@@ -93,10 +93,46 @@ export class AlertChannelController {
     return this.alertChannelService.testWebhookChannel(id, userId);
   }
 
+  @Post(':id/test-slack')
+  @ApiOperation({
+    summary: 'Fire a test Slack Block Kit message to verify a SLACK channel',
+    description:
+      'Sends a synthetic DOWN alert to the configured Slack Incoming Webhook URL. ' +
+      'Validates that the URL is a Slack webhook before sending. ' +
+      'Does not create any AlertEvent or log record. ' +
+      'Returns { success, error? } — never throws on delivery-side failures.',
+  })
+  @ApiResponse({ status: 200, description: 'Test result: { success, error? }' })
+  @ApiResponse({ status: 400, description: 'Channel is not SLACK type or URL is invalid.' })
+  @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
+  @ApiResponse({ status: 404, description: 'Channel not found.' })
+  testSlack(@Param('id') id: string, @GetUserId() userId: string) {
+    return this.alertChannelService.testSlackChannel(id, userId);
+  }
+
+  @Post(':id/test-discord')
+  @ApiOperation({
+    summary: 'Fire a test Discord Embed message to verify a DISCORD channel',
+    description:
+      'Sends a synthetic DOWN alert embed to the configured Discord webhook URL. ' +
+      'Validates that the URL is a Discord webhook before sending. ' +
+      'Does not create any AlertEvent or log record. ' +
+      'Returns { success, error? } — never throws on delivery-side failures.',
+  })
+  @ApiResponse({ status: 200, description: 'Test result: { success, error? }' })
+  @ApiResponse({ status: 400, description: 'Channel is not DISCORD type or URL is invalid.' })
+  @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })
+  @ApiResponse({ status: 404, description: 'Channel not found.' })
+  testDiscord(@Param('id') id: string, @GetUserId() userId: string) {
+    return this.alertChannelService.testDiscordChannel(id, userId);
+  }
+
   @Get(':id/webhook-logs')
   @ApiOperation({
-    summary: 'Get webhook delivery logs for a channel',
-    description: 'Returns delivery attempts ordered newest-first. Use limit/offset for pagination.',
+    summary: 'Get delivery logs for a channel (WEBHOOK, SLACK, or DISCORD)',
+    description:
+      'Returns delivery attempts ordered newest-first. Use limit/offset for pagination. ' +
+      'The platformType field distinguishes WEBHOOK vs SLACK vs DISCORD entries.',
   })
   @ApiResponse({ status: 200, description: 'Array of WebhookDeliveryLog records.' })
   @ApiResponse({ status: 403, description: 'Not the owner of this channel.' })

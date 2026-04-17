@@ -4,12 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AlertChannel, AlertChannelType } from '../../generated/prisma/client';
+import { AlertChannel, AlertChannelType, Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma';
+import { DiscordService } from './discord.service';
 import { CreateAlertChannelDto } from './dto/create-alert-channel.dto';
 import { UpdateAlertChannelDto } from './dto/update-alert-channel.dto';
 import { EmailService } from './email.service';
 import { SSRFProtectionError } from './errors/webhook.errors';
+import { SlackService } from './slack.service';
 import { WebhookService, WebhookTestResult } from './webhook.service';
 
 /**
@@ -31,12 +33,20 @@ export type PublicAlertChannel = Omit<AlertChannel, 'secret'> & {
   hasSecret: boolean;
 };
 
+/** Result shape returned by the Slack and Discord test endpoints. */
+export interface PlatformTestResult {
+  success: boolean;
+  error?: string;
+}
+
 @Injectable()
 export class AlertChannelService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly webhookService: WebhookService,
+    private readonly slackService: SlackService,
+    private readonly discordService: DiscordService,
   ) {}
 
   async create(userId: string, dto: CreateAlertChannelDto): Promise<PublicAlertChannel> {
@@ -57,6 +67,12 @@ export class AlertChannelService {
         value: dto.value,
         label: dto.label ?? null,
         secret: dto.secret ?? null,
+        // Only include platformMetadata when the caller provides it — omitting
+        // the key lets Prisma default the nullable column to NULL in the DB.
+        // Cast to Prisma.InputJsonValue for type compatibility.
+        ...(dto.platformMetadata != null && {
+          platformMetadata: dto.platformMetadata as Prisma.InputJsonValue,
+        }),
       },
     });
 
@@ -87,6 +103,12 @@ export class AlertChannelService {
         ...(dto.label !== undefined && { label: dto.label }),
         // Allow setting, updating, or clearing (null) the secret
         ...(dto.secret !== undefined && { secret: dto.secret || null }),
+        // Allow updating or clearing (null) platformMetadata.
+        // Passing null explicitly sets the column to SQL NULL.
+        // Cast to Prisma.InputJsonValue for type compatibility.
+        ...(dto.platformMetadata !== undefined && {
+          platformMetadata: dto.platformMetadata as Prisma.InputJsonValue,
+        }),
       },
     });
 
@@ -147,6 +169,70 @@ export class AlertChannelService {
         throw new BadRequestException(error.message);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Fire a test Slack Block Kit message to a SLACK channel to verify
+   * the webhook URL is reachable and correctly configured.
+   * Does NOT create AlertEvent or WebhookDeliveryLog records.
+   */
+  async testSlackChannel(id: string, userId: string): Promise<PlatformTestResult> {
+    const channel = await this.prisma.alertChannel.findUnique({ where: { id } });
+    if (!channel) throw new NotFoundException('Alert channel not found');
+    if (channel.userId !== userId) throw new ForbiddenException('Access denied');
+    if (channel.type !== AlertChannelType.SLACK) {
+      throw new BadRequestException('This endpoint is only available for SLACK channels');
+    }
+
+    const appUrl = process.env.APP_URL ?? 'https://pulsee.website';
+
+    try {
+      await this.slackService.sendSlackAlert({
+        webhookUrl: channel.value,
+        monitorName: 'Test Monitor',
+        monitorUrl: 'https://example.com',
+        type: 'DOWN',
+        triggeredAt: new Date(),
+        errorMessage: 'This is a test alert — your channel is configured correctly.',
+        dashboardUrl: `${appUrl}/dashboard`,
+      });
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
+   * Fire a test Discord Embed message to a DISCORD channel to verify
+   * the webhook URL is reachable and correctly configured.
+   * Does NOT create AlertEvent or WebhookDeliveryLog records.
+   */
+  async testDiscordChannel(id: string, userId: string): Promise<PlatformTestResult> {
+    const channel = await this.prisma.alertChannel.findUnique({ where: { id } });
+    if (!channel) throw new NotFoundException('Alert channel not found');
+    if (channel.userId !== userId) throw new ForbiddenException('Access denied');
+    if (channel.type !== AlertChannelType.DISCORD) {
+      throw new BadRequestException('This endpoint is only available for DISCORD channels');
+    }
+
+    const appUrl = process.env.APP_URL ?? 'https://pulsee.website';
+
+    try {
+      await this.discordService.sendDiscordAlert({
+        webhookUrl: channel.value,
+        monitorName: 'Test Monitor',
+        monitorUrl: 'https://example.com',
+        type: 'DOWN',
+        triggeredAt: new Date(),
+        errorMessage: 'This is a test alert — your channel is configured correctly.',
+        dashboardUrl: `${appUrl}/dashboard`,
+      });
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 

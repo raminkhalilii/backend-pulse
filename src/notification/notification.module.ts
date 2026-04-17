@@ -5,7 +5,9 @@ import { ALERT_DELIVERY_QUEUE } from '../queue/queue.constants';
 import { AlertChannelController } from './alert-channel.controller';
 import { AlertChannelService } from './alert-channel.service';
 import { AlertDeliveryConsumer } from './alert-delivery.consumer';
+import { DiscordService } from './discord.service';
 import { EmailService } from './email.service';
+import { SlackService } from './slack.service';
 import { WebhookSecurityService } from './webhook-security.service';
 import { WebhookService } from './webhook.service';
 
@@ -38,9 +40,11 @@ import { WebhookService } from './webhook.service';
     EmailService,
     WebhookSecurityService,
     WebhookService,
+    SlackService,
+    DiscordService,
     AlertDeliveryConsumer,
     AlertChannelService,
   ],
-  exports: [EmailService, WebhookService, AlertChannelService],
+  exports: [EmailService, WebhookService, SlackService, DiscordService, AlertChannelService],
 })
 export class NotificationModule {}

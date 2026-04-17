@@ -1,4 +1,5 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { DiscordPlatformMetadata, SlackPlatformMetadata } from './create-alert-channel.dto';
 
 export class UpdateAlertChannelDto {
   @IsOptional()
@@ -18,4 +19,12 @@ export class UpdateAlertChannelDto {
   @IsString()
   @MaxLength(255)
   secret?: string | null;
+
+  /**
+   * Update or clear the platform display metadata for SLACK or DISCORD channels.
+   * Pass null to remove the metadata.
+   */
+  @IsOptional()
+  @IsObject()
+  platformMetadata?: SlackPlatformMetadata | DiscordPlatformMetadata | null;
 }

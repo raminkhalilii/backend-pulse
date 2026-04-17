@@ -48,6 +48,12 @@ enum AlertChannelType {
   DISCORD
 }
 
+enum PlatformType {
+  WEBHOOK
+  SLACK
+  DISCORD
+}
+
 model User {
   id           String  @id @default(uuid())
   email        String  @unique
@@ -150,7 +156,8 @@ model AlertChannel {
   value   String           // Email address, webhook URL, etc.
   label   String?          // Optional friendly name e.g. "Work email"
   enabled Boolean          @default(true)
-  secret  String?          // Optional HMAC-SHA256 signing secret (WEBHOOK channels only)
+  secret           String?          // Optional HMAC-SHA256 signing secret (WEBHOOK channels only)
+  platformMetadata Json?            // Optional display config: { workspaceName?, channelName? } for SLACK; { serverName?, channelName? } for DISCORD
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   webhookDeliveryLogs WebhookDeliveryLog[]
@@ -170,7 +177,8 @@ model WebhookDeliveryLog {
   responseTimeMs Int
   success        Boolean
   errorMessage   String?
-  attemptedAt    DateTime @default(now())
+  platformType   PlatformType @default(WEBHOOK) // Distinguishes WEBHOOK vs SLACK vs DISCORD log entries
+  attemptedAt    DateTime     @default(now())
 
   alertChannel AlertChannel @relation(fields: [alertChannelId], references: [id], onDelete: Cascade)
   alertEvent   AlertEvent   @relation(fields: [alertEventId], references: [id], onDelete: Cascade)
