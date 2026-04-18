@@ -81,6 +81,22 @@ const mockEmailService = {
   sendAlertEmail: jest.fn(),
 };
 
+const mockAlertSettingsService = {
+  getChannelsForMonitor: jest.fn(),
+};
+
+const mockWebhookService = {
+  sendAlertWebhook: jest.fn(),
+};
+
+const mockSlackService = {
+  sendAlertSlack: jest.fn(),
+};
+
+const mockDiscordService = {
+  sendAlertDiscord: jest.fn(),
+};
+
 // ─── Test suite ───────────────────────────────────────────────────────────────
 
 describe('AlertDeliveryConsumer', () => {
@@ -89,7 +105,14 @@ describe('AlertDeliveryConsumer', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Instantiate directly — no Nest DI overhead needed for unit tests.
-    consumer = new (AlertDeliveryConsumer as any)(mockPrisma, mockEmailService);
+    consumer = new (AlertDeliveryConsumer as any)(
+      mockPrisma,
+      mockAlertSettingsService,
+      mockEmailService,
+      mockWebhookService,
+      mockSlackService,
+      mockDiscordService,
+    );
   });
 
   const JOB_PAYLOAD: AlertDeliveryPayload = {
@@ -105,7 +128,7 @@ describe('AlertDeliveryConsumer', () => {
     const channel2 = makeChannel({ id: 'ch-2', value: 'b@example.com' });
 
     mockPrisma.alertEvent.findUnique.mockResolvedValue(makeAlertEvent(AlertEventType.DOWN));
-    mockPrisma.alertChannel.findMany.mockResolvedValue([channel1, channel2]);
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([channel1, channel2]);
     mockEmailService.sendAlertEmail.mockResolvedValue(undefined);
     mockPrisma.alertEvent.update.mockResolvedValue({});
 
@@ -128,12 +151,12 @@ describe('AlertDeliveryConsumer', () => {
   // ── Disabled channels are skipped ─────────────────────────────────────────
 
   it('only attempts delivery to enabled channels (disabled ones are excluded by the query)', async () => {
-    // The query in the consumer filters enabled:true, so the mock just returns
-    // only the enabled channel — simulating Prisma's WHERE clause.
+    // AlertSettingsService.getChannelsForMonitor already filters enabled:true,
+    // so the mock just returns only the enabled channel — simulating the service's filtering.
     const enabledChannel = makeChannel({ id: 'ch-enabled', value: 'ok@example.com' });
 
     mockPrisma.alertEvent.findUnique.mockResolvedValue(makeAlertEvent(AlertEventType.DOWN));
-    mockPrisma.alertChannel.findMany.mockResolvedValue([enabledChannel]); // disabled excluded
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([enabledChannel]); // disabled excluded
     mockEmailService.sendAlertEmail.mockResolvedValue(undefined);
     mockPrisma.alertEvent.update.mockResolvedValue({});
 
@@ -155,7 +178,7 @@ describe('AlertDeliveryConsumer', () => {
     mockPrisma.alertEvent.findUnique.mockResolvedValue(
       makeAlertEvent(AlertEventType.RECOVERY, { latencyMs: 120 }),
     );
-    mockPrisma.alertChannel.findMany.mockResolvedValue([makeChannel()]);
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([makeChannel()]);
     mockEmailService.sendAlertEmail.mockResolvedValue(undefined);
     mockPrisma.alertEvent.update.mockResolvedValue({});
 
@@ -171,24 +194,51 @@ describe('AlertDeliveryConsumer', () => {
     );
   });
 
-  // ── Any failure → FAILED + rethrow ────────────────────────────────────────
+  // ── Partial failure → SENT (at least one channel succeeds) ────────────────
 
-  it('marks AlertEvent as FAILED and rethrows when any delivery fails', async () => {
+  it('marks AlertEvent as SENT when at least one delivery succeeds (partial failure ok)', async () => {
     const channel1 = makeChannel({ id: 'ch-ok', value: 'ok@example.com' });
     const channel2 = makeChannel({ id: 'ch-fail', value: 'fail@example.com' });
 
     mockPrisma.alertEvent.findUnique.mockResolvedValue(makeAlertEvent(AlertEventType.DOWN));
-    mockPrisma.alertChannel.findMany.mockResolvedValue([channel1, channel2]);
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([channel1, channel2]);
     mockEmailService.sendAlertEmail
       .mockResolvedValueOnce(undefined) // ch-ok succeeds
       .mockRejectedValueOnce(new Error('SMTP timeout')); // ch-fail fails
     mockPrisma.alertEvent.update.mockResolvedValue({});
 
+    // Should NOT throw when at least one channel succeeds
+    await expect(consumer.process(makeJob(JOB_PAYLOAD))).resolves.toBeUndefined();
+
+    // Both channels were attempted (fire-and-collect, no short-circuit)
+    expect(mockEmailService.sendAlertEmail).toHaveBeenCalledTimes(2);
+
+    // AlertEvent must be marked SENT (partial delivery is success)
+    expect(mockPrisma.alertEvent.update).toHaveBeenCalledWith({
+      where: { id: ALERT_EVENT_ID },
+      data: { deliveryStatus: DeliveryStatus.SENT },
+    });
+  });
+
+  // ── All channels fail → FAILED + rethrow ──────────────────────────────────
+
+  it('marks AlertEvent as FAILED and rethrows when ALL deliveries fail', async () => {
+    const channel1 = makeChannel({ id: 'ch-fail-1', value: 'fail1@example.com' });
+    const channel2 = makeChannel({ id: 'ch-fail-2', value: 'fail2@example.com' });
+
+    mockPrisma.alertEvent.findUnique.mockResolvedValue(makeAlertEvent(AlertEventType.DOWN));
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([channel1, channel2]);
+    mockEmailService.sendAlertEmail
+      .mockRejectedValueOnce(new Error('SMTP timeout 1')) // ch-fail-1 fails
+      .mockRejectedValueOnce(new Error('SMTP timeout 2')); // ch-fail-2 fails
+    mockPrisma.alertEvent.update.mockResolvedValue({});
+
+    // Should throw when ALL channels fail
     await expect(consumer.process(makeJob(JOB_PAYLOAD))).rejects.toThrow(
       'Delivery failed for alertEventId=',
     );
 
-    // Both channels were attempted (fire-and-collect, no short-circuit)
+    // Both channels were attempted
     expect(mockEmailService.sendAlertEmail).toHaveBeenCalledTimes(2);
 
     // AlertEvent must be marked FAILED
@@ -202,8 +252,8 @@ describe('AlertDeliveryConsumer', () => {
 
   it('marks AlertEvent as SENT without sending any emails when user has no email channels', async () => {
     mockPrisma.alertEvent.findUnique.mockResolvedValue(makeAlertEvent(AlertEventType.DOWN));
-    mockPrisma.alertChannel.findMany.mockResolvedValue([]); // no channels
-
+    mockAlertSettingsService.getChannelsForMonitor.mockResolvedValue([]); // no monitor-specific channels
+    mockPrisma.alertChannel.findMany.mockResolvedValue([]); // fallback: also no user channels
     mockPrisma.alertEvent.update.mockResolvedValue({});
 
     await consumer.process(makeJob(JOB_PAYLOAD));

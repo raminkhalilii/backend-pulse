@@ -2,9 +2,12 @@ import * as dns from 'node:dns/promises';
 import { SSRFProtectionError } from './errors/webhook.errors';
 import { WebhookSecurityService } from './webhook-security.service';
 
+// Mock the entire dns/promises module so lookup is a configurable Jest mock
+jest.mock('node:dns/promises');
+
 // Helper: mock dns.lookup to return a specific IP address
 function mockDns(address: string) {
-  jest.spyOn(dns, 'lookup').mockResolvedValue({ address, family: 4 });
+  (dns.lookup as jest.Mock).mockResolvedValue({ address, family: 4 });
 }
 
 describe('WebhookSecurityService', () => {
@@ -13,7 +16,7 @@ describe('WebhookSecurityService', () => {
 
   beforeEach(() => {
     service = new WebhookSecurityService();
-    jest.restoreAllMocks();
+    jest.resetAllMocks();
     // Default to development so HTTPS-only check doesn't interfere unless explicitly tested
     process.env.NODE_ENV = 'development';
   });
@@ -115,7 +118,7 @@ describe('WebhookSecurityService', () => {
     });
 
     it('rejects IPv6 loopback (::1)', async () => {
-      jest.spyOn(dns, 'lookup').mockResolvedValue({ address: '::1', family: 6 });
+      (dns.lookup as jest.Mock).mockResolvedValue({ address: '::1', family: 6 });
 
       await expect(
         service.validateWebhookUrl('https://attacker-controlled.com/hook'),
@@ -123,7 +126,7 @@ describe('WebhookSecurityService', () => {
     });
 
     it('rejects IPv6 unique-local fc00::/7', async () => {
-      jest.spyOn(dns, 'lookup').mockResolvedValue({ address: 'fc00::1', family: 6 });
+      (dns.lookup as jest.Mock).mockResolvedValue({ address: 'fc00::1', family: 6 });
 
       await expect(
         service.validateWebhookUrl('https://attacker-controlled.com/hook'),
@@ -131,7 +134,7 @@ describe('WebhookSecurityService', () => {
     });
 
     it('rejects IPv6 unique-local fd00::/8', async () => {
-      jest.spyOn(dns, 'lookup').mockResolvedValue({ address: 'fd00::1', family: 6 });
+      (dns.lookup as jest.Mock).mockResolvedValue({ address: 'fd00::1', family: 6 });
 
       await expect(
         service.validateWebhookUrl('https://attacker-controlled.com/hook'),
@@ -163,7 +166,7 @@ describe('WebhookSecurityService', () => {
   // ── DNS failure ────────────────────────────────────────────────────────────
 
   it('throws SSRFProtectionError when DNS lookup fails', async () => {
-    jest.spyOn(dns, 'lookup').mockRejectedValue(new Error('ENOTFOUND'));
+    (dns.lookup as jest.Mock).mockRejectedValue(new Error('ENOTFOUND'));
 
     await expect(service.validateWebhookUrl('https://does-not-exist.invalid/hook')).rejects.toThrow(
       SSRFProtectionError,
